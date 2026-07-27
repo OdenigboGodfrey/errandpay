@@ -24,8 +24,8 @@ TransferPlatform.Data
    - Data access
   
 TransferPlatform.Tests
-    - Transfer scenarios
-    - Concurrency tests
+   - Transfer scenarios
+   - Concurrency tests
 
 
 ---
