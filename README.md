@@ -10,20 +10,20 @@ The system supports account creation, account lookup, transfers, ledger tracking
 
 The solution is separated into three projects:
 
-TransferPlatform
 
-── TransferPlatform.Api
+TransferPlatform.Api
    - REST API endpoints
    - Business services
    - Dependency injection
    - Redis distributed locking
-── TransferPlatform.Data
+  
+TransferPlatform.Data
    - Entity Framework Core models
    - Database context
    - Database entities
    - Data access
-── TransferPlatform.Tests
-    - Unit tests
+  
+TransferPlatform.Tests
     - Transfer scenarios
     - Concurrency tests
 
