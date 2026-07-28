@@ -63,32 +63,52 @@ public class TransferService : ITransferService
         {
             await using var tx = await _db.Database.BeginTransactionAsync();
 
-            // Lock sender row
-            var sender = await _db.Accounts
-                .FromSqlRaw(SelectAccountForUpdate.PrepareQuery(_db), request.FromAccountId)
+            Guid firstLockId;
+            Guid secondLockId;
+
+            if (request.FromAccountId.CompareTo(request.ToAccountId) < 0)
+            {
+                firstLockId = request.FromAccountId;
+                secondLockId = request.ToAccountId;
+            }
+            else
+            {
+                firstLockId = request.ToAccountId;
+                secondLockId = request.FromAccountId;
+            }
+
+            // Lock firstAccount row
+            var firstAccount = await _db.Accounts
+                .FromSqlRaw(SelectAccountForUpdate.PrepareQuery(_db), firstLockId)
                 .SingleOrDefaultAsync();
 
-            if (sender == null)
+            if (firstAccount == null)
             {
-                response.Message = "Sender Account not found";
+                Console.WriteLine($"First Account {firstLockId} not found");
+                response.Message = "Account not found";
                 response.Status = false;
                 response.Code = "404";
                 return response;
             }
 
 
-            // Lock receiver row
-            var receiver = await _db.Accounts
-                .FromSqlRaw(SelectAccountForUpdate.PrepareQuery(_db), request.ToAccountId)
+            // Lock secondAccount row
+            var secondAccount = await _db.Accounts
+                .FromSqlRaw(SelectAccountForUpdate.PrepareQuery(_db), secondLockId)
                 .SingleOrDefaultAsync();
 
-            if (receiver == null)
+            if (secondAccount == null)
             {
-                response.Message = "Receiver Account not found";
+                Console.WriteLine($"Second Account {secondLockId} not found");
+                response.Message = "Account not found";
                 response.Status = false;
                 response.Code = "404";
                 return response;
             }
+
+            var sender = firstAccount.Id == request.FromAccountId ? firstAccount : secondAccount;
+
+            var receiver = firstAccount.Id == request.ToAccountId ? firstAccount : secondAccount;
 
 
             if (sender.Balance < request.Amount)
