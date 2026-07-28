@@ -23,29 +23,12 @@ public class TransferService : ITransferService
     public async Task<ApiResponse<bool>> ProcessTransferAsync(TransferRequest request)
     {
         ApiResponse<bool> response = new();
-        var lockKey = $"lock:account:{request.FromAccountId}";
-        var lockValue = Guid.NewGuid().ToString();
 
         // check request id doesn't exist
         var existing = await _db.LedgerEntries.AnyAsync(x => x.RequestId == request.RequestId);
         if (existing)
         {
             response.Message = "Duplicate request id";
-            response.Status = false;
-            response.Code = "409";
-            return response;
-        }
-
-
-        // Lock expires automatically if the process crashes.
-        var lockTaken = await _redis.LockTakeAsync(
-            lockKey,
-            lockValue,
-            TimeSpan.FromSeconds(10));
-
-        if (!lockTaken)
-        {
-            response.Message = "Another transfer is already being processed for this account.";
             response.Status = false;
             response.Code = "409";
             return response;
@@ -59,10 +42,15 @@ public class TransferService : ITransferService
             return response;
         }
 
+        bool lockTaken = false;
+        bool secondLockTaken = false;
+        string lockKey = string.Empty;
+        string secondLockKey = string.Empty;
+        var lockValue = Guid.NewGuid().ToString();
+        var secondLockValue = Guid.NewGuid().ToString();
+
         try
         {
-            await using var tx = await _db.Database.BeginTransactionAsync();
-
             Guid firstLockId;
             Guid secondLockId;
 
@@ -76,6 +64,41 @@ public class TransferService : ITransferService
                 firstLockId = request.ToAccountId;
                 secondLockId = request.FromAccountId;
             }
+
+            lockKey = $"lock:account:{firstLockId}";
+            secondLockKey = $"lock:account:{secondLockId}";
+            
+            // Lock expires automatically if the process crashes.
+            lockTaken = await _redis.LockTakeAsync(
+                lockKey,
+                lockValue,
+                TimeSpan.FromSeconds(10));
+
+            if (!lockTaken)
+            {
+                Console.WriteLine($"Lock {lockKey} taken");
+                response.Message = "Another transfer is already being processed for this account.";
+                response.Status = false;
+                response.Code = "409";
+                return response;
+            }
+
+            secondLockTaken = await _redis.LockTakeAsync(
+                secondLockKey,
+                secondLockValue,
+                TimeSpan.FromSeconds(10));
+
+            if (!secondLockTaken)
+            {
+                Console.WriteLine($"Lock {secondLockKey} taken");
+                response.Message = "Another transfer is already being processed for this account.";
+                response.Status = false;
+                response.Code = "409";
+                return response;
+            }
+
+            await using var tx = await _db.Database.BeginTransactionAsync();
+
 
             // Lock firstAccount row
             var firstAccount = await _db.Accounts
@@ -147,7 +170,9 @@ public class TransferService : ITransferService
         }
         finally
         {
-            await _redis.LockReleaseAsync(lockKey, lockValue);
+
+            if (secondLockTaken) await _redis.LockReleaseAsync(secondLockKey, secondLockValue);
+            if (lockTaken) await _redis.LockReleaseAsync(lockKey, lockValue);
         }
 
         return response;
